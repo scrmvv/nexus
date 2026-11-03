@@ -1,0 +1,23 @@
+[Unit]
+Description=NEXUS personal VPS live dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/home/deploy/nexus
+ExecStart=/usr/bin/node /home/deploy/nexus/server/index.mjs
+Restart=on-failure
+RestartSec=4
+Environment=NODE_ENV=production
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+CapabilityBoundingSet=
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

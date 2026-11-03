@@ -1,0 +1,238 @@
+import os from 'node:os';
+import fs from 'node:fs';
+import { execFile } from 'node:child_process';
+import { isIP } from 'node:net';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const MAX_EVENTS = 90;
+const HISTORY_POINTS = 48;
+const ONE_MIN = 60_000;
+
+export function sanitizePath(path) {
+  if (typeof path !== 'string') return '/';
+  let clean = path.split('?')[0].split('#')[0].slice(0, 180);
+  clean = clean.replace(/[\r\n\t<>"']/g, '');
+  clean = clean.replace(/[0-9a-f]{20,}/gi, ':id');
+  clean = clean.replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, ':uuid');
+  clean = clean.replace(/\b\d{8,}\b/g, ':number');
+  clean = clean.replace(/\/([A-Za-z0-9_-]{28,})(?=\/|$)/g, '/:token');
+  return clean || '/';
+}
+
+export function parseAccessLine(line) {
+  // Exclude our own periodic site health check from visitor analytics.
+  if (line.includes('\"NEXUS-Monitor/1.0\"')) return null;
+  // Standard nginx combined log: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$referer" "$user_agent"
+  const m = line.match(/^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"([^"]*)"\s+(\d{3})\s+(\S+)/);
+  if (!m || !isIP(m[1])) return null;
+  const [method = '-', rawPath = '/'] = m[3].split(/\s+/, 3);
+  const status = Number(m[4]);
+  const path = sanitizePath(rawPath);
+  const suspicious = /(\/\.env\b|\/wp-admin\b|\/wp-login\b|\/\.git\b|\/phpmyadmin\b|\/cgi-bin\b|\/vendor\/phpunit\b|\/actuator\b)/i.test(path);
+  return {
+    ip: m[1],
+    method: method.slice(0, 12).replace(/[^A-Z]/g, '') || '-',
+    path,
+    status,
+    suspicious,
+    // Real IP and raw request are never sent to the browser.
+    at: Date.now(),
+  };
+}
+
+function readMem() {
+  try {
+    const mem = Object.fromEntries(fs.readFileSync('/proc/meminfo', 'utf8').split('\n').map(l => {
+      const m = l.match(/^([^:]+):\s+(\d+)\s+kB/);
+      return m ? [m[1], Number(m[2]) * 1024] : [];
+    }).filter(x => x.length));
+    const total = mem.MemTotal || os.totalmem();
+    const available = mem.MemAvailable ?? os.freemem();
+    return { usedPercent: Math.round(100 * (total - available) / total), usedBytes: total - available, totalBytes: total };
+  } catch {
+    const total = os.totalmem();
+    return { usedPercent: Math.round(100 * (total - os.freemem()) / total), usedBytes: total - os.freemem(), totalBytes: total };
+  }
+}
+function readDisk() {
+  try {
+    const info = fs.statfsSync('/');
+    const total = info.blocks * info.bsize;
+    const free = info.bavail * info.bsize;
+    return { usedPercent: Math.round((total - free) * 100 / Math.max(total, 1)), totalBytes: total, usedBytes: total - free };
+  } catch { return { usedPercent: null, totalBytes: null, usedBytes: null }; }
+}
+function getCpuTimes() {
+  return os.cpus().reduce((acc, cpu) => {
+    for (const [name, value] of Object.entries(cpu.times)) {
+      acc.total += value;
+      if (name === 'idle') acc.idle += value;
+    }
+    return acc;
+  }, { total: 0, idle: 0 });
+}
+function defaultNetInterface() {
+  try {
+    const routes = fs.readFileSync('/proc/net/route', 'utf8').split('\n').slice(1);
+    const route = routes.map(line => line.trim().split(/\s+/)).find(parts => parts[1] === '00000000' && parts[0] !== 'lo');
+    return route?.[0] || null;
+  } catch { return null; }
+}
+function readNet(iface) {
+  try {
+    const rows = fs.readFileSync('/proc/net/dev', 'utf8').split('\n').slice(2);
+    const found = rows.map(row => row.trim().split(/[:\s]+/)).find(parts => parts[0] === iface);
+    return found ? { rx: Number(found[1]), tx: Number(found[9]) } : null;
+  } catch { return null; }
+}
+
+export class Metrics {
+  constructor() {
+    this.cpuPrev = getCpuTimes();
+    this.netInterface = defaultNetInterface();
+    this.netPrev = this.netInterface ? readNet(this.netInterface) : null;
+    this.netAt = Date.now();
+    this.history = [];
+  }
+  sample() {
+    const cpuNow = getCpuTimes();
+    const total = cpuNow.total - this.cpuPrev.total;
+    const idle = cpuNow.idle - this.cpuPrev.idle;
+    const cpuPercent = total > 0 ? Math.min(100, Math.max(0, Math.round((1 - idle / total) * 100))) : 0;
+    this.cpuPrev = cpuNow;
+    const netNow = this.netInterface ? readNet(this.netInterface) : null;
+    const now = Date.now();
+    const seconds = Math.max((now - this.netAt) / 1000, .1);
+    const rxBps = netNow && this.netPrev ? Math.max(0, (netNow.rx - this.netPrev.rx) / seconds) : 0;
+    const txBps = netNow && this.netPrev ? Math.max(0, (netNow.tx - this.netPrev.tx) / seconds) : 0;
+    this.netPrev = netNow;
+    this.netAt = now;
+    const result = {
+      at: now,
+      cpuPercent,
+      memory: readMem(),
+      disk: readDisk(),
+      network: { rxBps: Math.round(rxBps), txBps: Math.round(txBps), interface: this.netInterface || '—' },
+      uptimeSec: Math.round(os.uptime()),
+      load: os.loadavg()[0],
+    };
+    this.history.push({ time: now, cpu: cpuPercent, ram: result.memory.usedPercent, rx: result.network.rxBps });
+    if (this.history.length > HISTORY_POINTS) this.history.shift();
+    return result;
+  }
+}
+
+export async function serviceStatus(name) {
+  try {
+    const { stdout } = await execFileAsync('systemctl', ['is-active', name], { timeout: 2500 });
+    return stdout.trim() === 'active' ? 'up' : 'down';
+  } catch (e) {
+    if (e?.stdout) return e.stdout.toString().trim() === 'inactive' ? 'down' : 'unknown';
+    return 'unknown';
+  }
+}
+
+export async function siteStatus(url) {
+  if (!url) return { status: 'unknown', code: null, latencyMs: null };
+  const start = Date.now();
+  try {
+    const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(5500), headers: { 'User-Agent': 'NEXUS-Monitor/1.0' } });
+    // Drain and release the connection without downloading the full page.
+    await res.body?.cancel();
+    return { status: res.status < 400 ? 'up' : 'down', code: res.status, latencyMs: Date.now() - start };
+  } catch { return { status: 'down', code: null, latencyMs: null }; }
+}
+
+export class AccessLogTail {
+  constructor(path, onLine, onState) {
+    this.path = path;
+    this.onLine = onLine;
+    this.onState = onState;
+    this.position = 0;
+    this.inode = null;
+    this.partial = '';
+    this.timer = null;
+    this.running = false;
+    this.readable = false;
+  }
+  async poll() {
+    if (this.running) return;
+    this.running = true;
+    try {
+      const stat = await fs.promises.stat(this.path);
+      if (this.inode === null || stat.ino !== this.inode || stat.size < this.position) {
+        const firstOpen = this.inode === null;
+        this.inode = stat.ino;
+        this.position = firstOpen ? stat.size : 0; // Only initial startup skips historical logs.
+        this.partial = '';
+      }
+      await fs.promises.access(this.path, fs.constants.R_OK);
+      if (!this.readable) { this.readable = true; this.onState(true); }
+      const unread = stat.size - this.position;
+      if (unread <= 0) return;
+      if (unread > 1024 * 1024) { // Recover gracefully from a spike.
+        this.position = stat.size;
+        this.partial = '';
+        return;
+      }
+      const fd = await fs.promises.open(this.path, 'r');
+      try {
+        const buf = Buffer.alloc(unread);
+        const { bytesRead } = await fd.read(buf, 0, unread, this.position);
+        this.position += bytesRead;
+        const parts = (this.partial + buf.subarray(0, bytesRead).toString('utf8')).split('\n');
+        this.partial = (parts.pop() || '').slice(-1024);
+        for (const line of parts.slice(-400)) this.onLine(line);
+      } finally { await fd.close(); }
+    } catch {
+      if (this.readable) { this.readable = false; this.onState(false); }
+    } finally { this.running = false; }
+  }
+  start() {
+    this.poll();
+    this.timer = setInterval(() => this.poll(), 900);
+    this.timer.unref();
+  }
+  stop() { if (this.timer) clearInterval(this.timer); }
+}
+
+export class Traffic {
+  constructor(geoLookup, emit) {
+    this.geoLookup = geoLookup;
+    this.emit = emit;
+    this.events = [];
+    this.hits = [];
+    this.allRequests = 0;
+  }
+  async record(line) {
+    const item = parseAccessLine(line);
+    if (!item) return;
+    this.allRequests++;
+    this.hits.push({ at: item.at, status: item.status });
+    this.clean();
+    const safe = { id: `${item.at}-${this.allRequests}`, at: item.at, method: item.method, path: item.path, status: item.status, suspicious: item.suspicious, geo: null };
+    this.events.unshift(safe);
+    if (this.events.length > MAX_EVENTS) this.events.length = MAX_EVENTS;
+    this.emit({ type: 'access', data: safe });
+    // Deferred geolocation. Never send an IP to the frontend or any online service.
+    const geo = await this.geoLookup(item.ip);
+    if (geo) {
+      safe.geo = geo;
+      this.emit({ type: 'geo', data: { id: safe.id, geo } });
+    }
+  }
+  clean() {
+    const cutoff = Date.now() - ONE_MIN;
+    while (this.hits.length && this.hits[0].at < cutoff) this.hits.shift();
+    if (this.hits.length > 30000) this.hits.splice(0, this.hits.length - 30000);
+  }
+  counters() {
+    this.clean();
+    return {
+      rpm: this.hits.length,
+      errors: this.hits.filter(x => x.status >= 400).length,
+      totalSinceStart: this.allRequests,
+    };
+  }
+}

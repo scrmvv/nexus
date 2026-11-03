@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#070d16" />
+  <meta name="description" content="NEXUS — live-инфраструктура личного VPS и сайта." />
+  <title>NEXUS — Live Infrastructure</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+<div class="grain"></div>
+<div class="shell">
+  <header class="header">
+    <div class="brand"><div class="brand-icon"><span></span><i></i></div><div><div class="brand-name">NEXUS<span class="brand-dot">.</span></div><div class="brand-caption">LIVE INFRASTRUCTURE</div></div></div>
+    <div class="header-center"><span class="thin-line"></span><span>PERSONAL CONTROL CENTER</span></div>
+    <div class="header-actions"><div class="clock" id="clock">--:--:--</div><span class="status-tag" id="connection"><i class="led waiting"></i> CONNECTING</span><button id="demo-switch" class="mode-switch" title="Включить или выключить демонстрационные события">ДЕМО: ВКЛ</button></div>
+  </header>
+  <div class="divider"></div>
+  <div class="headline">
+    <div class="headline-left"><span class="kicker"><span class="kicker-corner">+</span> OVERVIEW <span class="kicker-corner">+</span></span><h1>Инфраструктура <em>в движении.</em></h1><p>Мониторинг личного VPS и <span class="site-name">scrmvv.space</span> без лишнего шума.</p></div>
+    <div class="headline-right"><span class="tiny-label">ПЕРИОД ОБНОВЛЕНИЯ</span><div class="refresh"><span class="pulse-dot"></span> 2 СЕКУНДЫ</div><span class="clock-caption">Локальное время: <span id="local-timezone">—</span></span></div>
+  </div>
+  <section class="metric-grid" aria-label="Основные метрики сервера">
+    <article class="metric-card"><div class="metric-heading"><span>ЗАГРУЗКА CPU</span><span class="metric-index">01 / 04</span></div><div class="metric-value"><span id="cpu">—</span><small>%</small></div><div class="progress-line"><div id="cpu-bar"></div></div><div class="metric-foot"><span>Процессор VPS</span><span id="cpu-status">ОЖИДАНИЕ</span></div></article>
+    <article class="metric-card"><div class="metric-heading"><span>ОПЕРАТИВНАЯ ПАМЯТЬ</span><span class="metric-index">02 / 04</span></div><div class="metric-value"><span id="ram">—</span><small>%</small></div><div class="progress-line"><div id="ram-bar"></div></div><div class="metric-foot"><span id="ram-used">Использование RAM</span><span id="ram-status">ОЖИДАНИЕ</span></div></article>
+    <article class="metric-card"><div class="metric-heading"><span>СЕТЕВОЙ ТРАФИК</span><span class="metric-index">03 / 04</span></div><div class="metric-value network-value"><span id="network">—</span><small id="network-unit">КБ/С</small></div><div class="network-foot"><span class="download">↓ RX <b id="rx">—</b></span><span class="upload">↑ TX <b id="tx">—</b></span></div></article>
+    <article class="metric-card"><div class="metric-heading"><span>ЗАПРОСЫ / 60 СЕК</span><span class="metric-index">04 / 04</span></div><div class="metric-value"><span id="rpm">—</span><small>REQ</small></div><div class="progress-stacked" id="rpm-bars"></div><div class="metric-foot"><span>Данные Nginx</span><span id="error-count">0 ОШИБОК</span></div></article>
+  </section>
+  <main class="main-grid">
+    <section class="panel globe-panel">
+      <div class="panel-header"><div><div class="section-kicker">01 / ГЕОГРАФИЯ ТРАФИКА</div><h2>Мир на связи</h2></div><div class="subtle-pill"><span class="dot-cyan"></span> LIVE ORBIT</div></div>
+      <div class="globe-area"><canvas id="globe" aria-label="Интерактивный 3D-глобус с географией запросов"></canvas><div class="globe-hud hud-top"><span class="hud-cross">⌜</span> NETWORK OBSERVATION <span class="hud-cross">⌝</span></div><div class="globe-hud hud-bottom"><span>DRAG TO ROTATE</span><span>SCROLL TO ZOOM</span></div><div class="orbit-status"><span class="orbit-status-dot"></span><span id="geo-status">ГЕОДАННЫЕ НЕ ПОДКЛЮЧЕНЫ</span></div></div>
+      <div class="globe-stats"><div><span class="tiny-label">ИСТОЧНИКИ</span><strong id="countries">—</strong></div><div><span class="tiny-label">ПОСЛЕДНИЙ ЗАПРОС</span><strong id="last-access">—</strong></div><div><span class="tiny-label">НАЗНАЧЕНИЕ</span><strong class="site-name">scrmvv.space</strong></div></div>
+    </section>
+    <section class="panel topology-panel">
+      <div class="panel-header"><div><div class="section-kicker">02 / КАРТА СИСТЕМЫ</div><h2>Топология</h2></div><div class="subtle-pill">01 VPS · 01 SITE</div></div>
+      <div class="topology-graph" id="topology-graph">
+        <svg class="connections" viewBox="0 0 480 270" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><defs><linearGradient id="linkfade" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#25536c"/><stop offset="50%" stop-color="#75e7d8"/><stop offset="100%" stop-color="#25536c"/></linearGradient></defs><path class="link-base" d="M240 48 V85 M240 147 V165 M240 224 V237"/><path class="link-flow" d="M240 48 V85 M240 147 V165 M240 224 V237"/></svg>
+        <div class="topology-stack">
+          <div class="topo-node topo-vps"><div class="topo-icon">▦</div><div class="topo-node-content"><span>VIRTUAL PRIVATE SERVER</span><strong id="vps-name">My VPS</strong></div><span class="topo-state" id="vps-status">●</span></div>
+          <div class="topo-node topo-nginx"><div class="topo-icon">⇄</div><div class="topo-node-content"><span>REVERSE PROXY</span><strong>NGINX</strong></div><span class="topo-state" id="nginx-status">●</span></div>
+          <div class="topo-node topo-site"><div class="topo-icon">⌘</div><div class="topo-node-content"><span>WEB APPLICATION</span><strong class="site-name">scrmvv.space</strong></div><span class="topo-state" id="site-status">●</span></div>
+        </div>
+      </div>
+      <div class="topology-bottom"><div class="topo-info"><span class="tiny-label">СТАТУС САЙТА</span><strong id="site-latency">Ожидание ответа</strong></div><a href="https://scrmvv.space" id="site-link" rel="noreferrer" target="_blank">ОТКРЫТЬ САЙТ <span>↗</span></a></div>
+    </section>
+    <section class="panel events-panel">
+      <div class="panel-header"><div><div class="section-kicker">03 / ЖУРНАЛ СОБЫТИЙ</div><h2>Поток запросов <span id="event-count" class="counter">00</span></h2></div><div class="event-filters" role="group" aria-label="Фильтр событий"><button data-filter="all" class="active">ВСЕ</button><button data-filter="errors">ОШИБКИ</button><button data-filter="suspicious">СКАНИРОВАНИЕ</button></div></div>
+      <div class="events-title-row"><span>ВРЕМЯ / МЕТОД</span><span>ЗАПРОС</span><span>КОД</span></div>
+      <div class="events-list" id="events-list" aria-live="polite"><div class="empty-state">Ждём первые события Nginx…</div></div>
+      <div class="events-footer"><div><span class="signal-icon">◉</span> <span id="log-status">ПРОВЕРКА ДОСТУПА К ЛОГАМ</span></div><span>ПОСЛЕДНИЕ 90 СОБЫТИЙ</span></div>
+    </section>
+    <section class="panel chart-panel"><div class="panel-header"><div><div class="section-kicker">04 / СОСТОЯНИЕ СИСТЕМЫ</div><h2>Нагрузка</h2></div><span class="subtle-pill">ПОСЛЕДНИЕ ~96 СЕК</span></div>
+      <div class="graph-legend"><span><i class="legend-cpu"></i> CPU</span><span><i class="legend-ram"></i> RAM</span><span class="graph-unit">%</span></div>
+      <svg id="history-chart" viewBox="0 0 460 172" preserveAspectRatio="none" role="img" aria-label="История загрузки CPU и RAM"><g class="grid-lines"><path d="M0 5 H460 M0 45 H460 M0 85 H460 M0 125 H460 M0 165 H460"/></g><path id="cpu-fill" fill="url(#cpuFill)" d=""/><path id="cpu-line" d=""/><path id="ram-line" d=""/><defs><linearGradient id="cpuFill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#62dccd" stop-opacity=".15"/><stop offset="100%" stop-color="#62dccd" stop-opacity="0"/></linearGradient></defs></svg>
+      <div class="disk-row"><div class="disk-head"><span>ДИСК /</span><strong id="disk-pct">—</strong></div><div class="disk-track"><div id="disk-bar"></div></div><span id="disk-details">Данные о диске недоступны</span></div>
+      <div class="uptime-row"><div><span class="tiny-label">UPTIME</span><strong id="uptime">—</strong></div><div><span class="tiny-label">LOAD AVERAGE</span><strong id="load">—</strong></div></div>
+    </section>
+  </main>
+  <footer><span>NEXUS / PERSONAL INFRASTRUCTURE</span><span id="footer-caption">ДАННЫЕ В РЕАЛЬНОМ ВРЕМЕНИ · PRIVATE BY DESIGN</span><span>V 0.1.0</span></footer>
+</div>
+</body>
+</html>

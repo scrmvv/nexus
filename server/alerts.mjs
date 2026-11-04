@@ -9,6 +9,8 @@ export class Alerts {
     this.now = now;
     this.history = new Map();
     this.cooldowns = new Map();
+    this.burstHistory = [];
+    this.burstCooldown = 0;
     this.globalCooldown = 0;
     this.failures = 0;
     this.siteDown = false;
@@ -32,21 +34,38 @@ export class Alerts {
   onRequest(item) {
     if (!item.suspicious) return;
     const now = this.now(), key = item.ip;
-    // Memory bounds and short window: no persistent raw IP storage.
+    // Keep short-lived IP data only in memory. It is never sent to the UI or persisted.
     for (const [ip, list] of this.history) {
       const recent = list.filter(at => now - at < 120_000);
       if (recent.length) this.history.set(ip, recent); else this.history.delete(ip);
     }
+    for (const [ip, until] of this.cooldowns) if (until <= now) this.cooldowns.delete(ip);
     const recent = this.history.get(key) || [];
     recent.push(now);
     this.history.set(key, recent);
     if (this.history.size > 5000) this.history.delete(this.history.keys().next().value);
-    if (recent.length < this.threshold || now < (this.cooldowns.get(key) || 0) || now < this.globalCooldown) return;
-    this.cooldowns.set(key, now + 15 * 60_000);
-    this.globalCooldown = now + 60_000;
-    const incident = { at: now, type: 'scan', source: item.source, count: recent.length, path: item.path, status: item.status };
-    this.onIncident(incident);
-    this.deliver(`⚠️ NEXUS · Подозрительная серия HTTP-запросов\nИсточник: ${item.source}\nСовпадений за 2 мин: ${recent.length}\nПоследний путь: ${item.path}\nHTTP ${item.status}\n\nЭвристика: это не доказательство взлома.`);
+
+    this.burstHistory.push({ at: now, ip: key });
+    this.burstHistory = this.burstHistory.filter(x => now - x.at < 60_000).slice(-3000);
+
+    if (recent.length >= this.threshold && now >= (this.cooldowns.get(key) || 0) && now >= this.globalCooldown) {
+      this.cooldowns.set(key, now + 15 * 60_000);
+      this.globalCooldown = now + 60_000;
+      const incident = { at: now, type: 'scan', source: item.source, count: recent.length, path: item.path, status: item.status };
+      this.onIncident(incident);
+      this.deliver(`⚠️ NEXUS · Подозрительная серия HTTP-запросов\nИсточник: ${item.source}\nСовпадений за 2 мин: ${recent.length}\nПоследний путь: ${item.path}\nHTTP ${item.status}\n\nЭвристика: это не доказательство взлома.`);
+      return;
+    }
+
+    // Catch distributed probes where no individual IP reaches the threshold.
+    const sources = new Set(this.burstHistory.map(x => x.ip)).size;
+    if (this.burstHistory.length >= 15 && sources >= 3 && now >= this.burstCooldown && now >= this.globalCooldown) {
+      this.burstCooldown = now + 15 * 60_000;
+      this.globalCooldown = now + 60_000;
+      const incident = { at: now, type: 'scan-burst', count: this.burstHistory.length, sources, path: item.path };
+      this.onIncident(incident);
+      this.deliver(`⚠️ NEXUS · Массовое сканирование сайта\nПодозрительных запросов за минуту: ${incident.count}\nРазных источников: ${sources}\nПример пути: ${item.path}\n\nIP-адреса не раскрываются. Это эвристическая оценка.`);
+    }
   }
   onHealth(status, name = 'Website') {
     if (status === 'down') {

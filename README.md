@@ -8,7 +8,7 @@
 
 **Zero npm dependencies · Real-time SSE · Local GeoIP · Optional Telegram alerts**
 
-![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-43853D?logo=nodedotjs&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue) ![Tests](https://img.shields.io/badge/tests-10%20passing-2ca58d)
+![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-43853D?logo=nodedotjs&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue) ![Tests](https://img.shields.io/badge/tests-14%20passing-2ca58d)
 
 [English](README.md) · [Русский](README.ru.md)
 
@@ -107,7 +107,7 @@ NEXUS logs only processed HTTP requests. Requests blocked upstream by a CDN, req
 2. Obtain the chat ID, for example by messaging your bot and inspecting `https://api.telegram.org/bot<TOKEN>/getUpdates` locally. Keep the token private.
 3. Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_IDS` into `.env`, then restart NEXUS.
 
-By default, an alert is sent only after **3 suspicious HTTP paths from the same source within 2 minutes**. Per-source cooldown is 15 minutes; global cooldown is 1 minute. Set `ALERT_SCAN_THRESHOLD=1` if you need alerts for individual probing attempts, at the cost of more notifications. Site-down alerts require 2 consecutive failed health checks, followed by a recovery notification. Notifications contain **masked** source addresses and sanitized paths.
+By default, an alert is sent only after **3 suspicious HTTP paths from the same source within 2 minutes**. Additionally, distributed bursts of 15 recognized suspicious requests from 3+ distinct IPs within one minute trigger an alert (subject to cooldowns). Per-source cooldown is 15 minutes; global cooldown is 1 minute. Set `ALERT_SCAN_THRESHOLD=1` if you need alerts for individual probing attempts, at the cost of more notifications. Site-down alerts require 2 consecutive failed health checks, followed by a recovery notification. Notifications contain **masked** source addresses and sanitized paths.
 
 Telegram is used only when explicitly configured. Messages travel to Telegram servers; leave alerts disabled if that is unsuitable for your privacy requirements.
 

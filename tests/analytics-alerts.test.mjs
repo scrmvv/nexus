@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Analytics } from '../server/analytics.mjs';
 import { Alerts } from '../server/alerts.mjs';
-import { parseAccessLine, maskIP } from '../server/monitor.mjs';
+import { parseAccessLine, maskIP, isProbingPath } from '../server/monitor.mjs';
 
 const LOG = '203.0.113.64 - - [04/Nov/2026:09:10:02 +0000] "GET /.env?token=do-not-persist HTTP/1.1" 403 150 "https://referrer.test/private" "curl/8.5.0" rt=0.014';
 
@@ -70,4 +70,38 @@ test('Telegram alerts group scan bursts, apply cooldown, and detect downtime/rec
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(incidents.length, 3);
   assert.equal(delivered.length, 3);
+});
+
+
+test('encoded probing paths are detected without changing displayed request path', () => {
+  for (const raw of ['/message/.env', '/daemon/.env', '/gitlab-ci/%2eenv', '/export/%252eenv', '/%252egit/config', '/wp-admin/install.php']) {
+    assert.equal(isProbingPath(raw), true, raw);
+  }
+  assert.equal(isProbingPath('/public/portfolio'), false);
+  assert.equal(isProbingPath('/foo/%invalid'), false);
+  const item = parseAccessLine(LOG.replace('/.env?token=do-not-persist', '/gitlab-ci/%2eenv?token=do-not-persist'));
+  assert.equal(item.suspicious, true);
+  assert.equal(item.path, '/gitlab-ci/%2eenv');
+});
+
+test('distributed scan produces one aggregated incident without exposing raw IPs', async () => {
+  let now = Date.parse('2026-11-04T14:00:00Z');
+  const delivered = [], incidents = [];
+  const alerts = new Alerts({ token: 'fake', chatIds: '123', now: () => now,
+    send: async text => delivered.push(text), onIncident: x => incidents.push(x), });
+  for (let n = 0; n < 15; n++) {
+    const item = { ...parseAccessLine(LOG), ip: `198.51.100.${n + 1}`, source: `198.51.100.xxx` };
+    alerts.onRequest(item);
+    now += 100;
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(incidents.length, 1);
+  assert.equal(incidents[0].type, 'scan-burst');
+  assert.equal(incidents[0].count, 15);
+  assert.equal(incidents[0].sources, 15);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].includes('198.51.100.1'), false);
+  for (let n = 15; n < 30; n++) alerts.onRequest({ ...parseAccessLine(LOG), ip: `198.51.100.${n+1}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(incidents.length, 1, 'cooldown prevents duplicate alerts');
 });

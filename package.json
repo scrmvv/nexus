@@ -1,6 +1,6 @@
 {
   "name": "nexus-live-infrastructure",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Self-hosted live observability dashboard for a Linux VPS and Nginx website",
   "scripts": {

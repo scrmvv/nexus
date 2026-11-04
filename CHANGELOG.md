@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] — 2026-11-04
+
+### Fixed and improved
+
+- Recognize single-, double- and triple-URL-encoded suspicious paths (`%2eenv`, `%252eenv`).
+- Detect distributed scan bursts (15 suspicious HTTP requests from 3+ IPs within 60 seconds).
+- Display distributed scan incidents in the dashboard.
+- Keep Telegram cooldowns, local-only IP processing and the current environment config.
+- Correct the dashboard footer version and add a regression test to keep the UI version synchronized with `package.json`.
+- Keep the GeoIP attribution export intact (covered by tests) for deployments using DB-IP Lite.
+- Existing historical aggregates are not recalculated.
+
 All notable changes to NEXUS are documented here.
 
 ## [0.2.0] — 2026-11-04

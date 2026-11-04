@@ -36,7 +36,7 @@ const alerts = new Alerts({
   token: process.env.TELEGRAM_BOT_TOKEN || '',
   chatIds: process.env.TELEGRAM_CHAT_IDS || '',
   threshold: process.env.ALERT_SCAN_THRESHOLD || '3',
-  onIncident: incident => { analytics.addIncident(incident); broadcast({ type: 'incident', data: incident }); },
+  onIncident: incident => { analytics.addIncident(incident); broadcast({ type: 'incident', data: incident }); console.info(`[NEXUS] Incident: ${incident.type} (${incident.count || 0} requests)`); },
 });
 const metrics = new Metrics();
 const subscribers = new Set();

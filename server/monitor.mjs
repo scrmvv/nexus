@@ -44,6 +44,24 @@ function referralHost(raw) {
     return ['http:', 'https:'].includes(url.protocol) ? url.hostname.slice(0, 80) : null;
   } catch { return null; }
 }
+// Recognize common probes even when path segments are URL-encoded.
+// Decode only for classification; the public event keeps the sanitized path.
+// Limit decoding rounds so malformed or adversarial input is cheap to process.
+const PROBE_PATH = /(\/\.env(?:\b|$)|\/wp-admin\b|\/wp-login\b|\/\.git\b|\/phpmyadmin\b|\/cgi-bin\b|\/vendor\/phpunit\b|\/actuator\b|\/\.aws\b|\/\.svn\b|\/server-status\b)/i;
+export function isProbingPath(path) {
+  let candidate = String(path || '/').slice(0, 180);
+  for (let round = 0; round < 4; round++) {
+    if (PROBE_PATH.test(candidate)) return true;
+    if (!candidate.includes('%')) break;
+    let decoded;
+    try { decoded = decodeURIComponent(candidate); }
+    catch { break; }
+    if (decoded === candidate) break;
+    candidate = decoded;
+  }
+  return false;
+}
+
 export function parseAccessLine(line) {
   if (line.includes('"NEXUS-Monitor/1.0"')) return null;
   // nginx combined, optionally followed by rt=<request_time>.
@@ -52,7 +70,7 @@ export function parseAccessLine(line) {
   const [method = '-', rawPath = '/'] = m[3].split(/\s+/, 3);
   const status = Number(m[4]);
   const path = sanitizePath(rawPath);
-  const suspicious = /(\/\.env(?:\b|$)|\/wp-admin\b|\/wp-login\b|\/\.git\b|\/phpmyadmin\b|\/cgi-bin\b|\/vendor\/phpunit\b|\/actuator\b|\/\.aws\b|\/\.svn\b|\/server-status\b)/i.test(path);
+  const suspicious = isProbingPath(path);
   const reason = suspicious ? 'known probing path' : null;
   const bytes = /^\d+$/.test(m[5]) ? Math.min(Number(m[5]), 1e12) : 0;
   const durationMs = m[8] != null ? Math.min(Math.round(Number(m[8]) * 1000), 3_600_000) : null;

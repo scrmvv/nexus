@@ -181,8 +181,8 @@ function drawAnalytics(stats) {
     const row=document.createElement('div');row.className='incident-row';
     const when=document.createElement('time');when.textContent=new Date(inc.at).toLocaleString('ru-RU');
     const body=document.createElement('div');
-    const title=document.createElement('strong');title.textContent=inc.type==='scan'?'Подозрительная серия запросов':inc.type==='site-down'?'Сайт недоступен':'Сайт восстановлен';
-    const note=document.createElement('span');note.textContent=inc.type==='scan'?`${inc.source||'Источник скрыт'} · ${inc.count||'?'} запросов · ${inc.path||''}`:inc.label||'Website';
+    const title=document.createElement('strong');title.textContent=inc.type==='scan'?'Подозрительная серия запросов':inc.type==='scan-burst'?'Массовое сканирование с разных IP':inc.type==='site-down'?'Сайт недоступен':'Сайт восстановлен';
+    const note=document.createElement('span');note.textContent=inc.type==='scan'?`${inc.source||'Источник скрыт'} · ${inc.count||'?'} запросов · ${inc.path||''}`:inc.type==='scan-burst'?`${inc.count||'?'} запросов · ${inc.sources||'?'} источников · ${inc.path||''}`:inc.label||'Website';
     body.append(title,note);row.append(when,body);list.append(row);
   }
 }

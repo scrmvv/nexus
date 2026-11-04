@@ -7,7 +7,7 @@ const DEMO_CITIES = [
   { lat: 35.68, lon: 139.69 }, { lat: 48.85, lon: 2.35 }, { lat: 51.5, lon: -0.12 },
   { lat: -23.55, lon: -46.63 }, { lat: 1.35, lon: 103.82 }, { lat: 25.2, lon: 55.27 },
 ];
-const DEMO_SITE = 'scrmvv.space';
+const DEMO_SITE = 'example.org';
 const DEMO_SERVER = { lat: 60.17, lon: 24.94 };
 let seq = 0;
 let mode = 'demo';
@@ -22,11 +22,20 @@ let networkStream;
 function createDemo() {
   const now = Date.now();
   return {
-    config: { siteLabel: DEMO_SITE, siteUrl: 'https://scrmvv.space', vpsLabel: 'Demo VPS' },
+    config: { siteLabel: DEMO_SITE, siteUrl: 'https://example.org', vpsLabel: 'Demo VPS' },
     metrics: { at: now, cpuPercent: 23, memory: { usedPercent: 48, totalBytes: 1024 ** 3, usedBytes: 512 * 1024 ** 2 }, disk: { usedPercent: 33, totalBytes: 12 * 1024 ** 3, usedBytes: 4 * 1024 ** 3 }, network: { rxBps: 63422, txBps: 14830 }, uptimeSec: 124813, load: .38 },
     traffic: { rpm: 11, errors: 1, totalSinceStart: 11 },
     health: { nginx: 'up', site: { status: 'up', code: 200, latencyMs: 39 }, logReadable: true, geoEnabled: true, serverGeo: DEMO_SERVER },
     events: [],
+    analytics: {
+      today: { requests: 234, uniqueSources: 61, suspicious: 9, bytes: 8900000, status: { '2xx': 204, '4xx': 28, '5xx': 2 } },
+      last24Hours: Array.from({ length: 24 }, (_, i) => ({ hour: String(i), count: Math.floor(2 + 22*Math.abs(Math.sin(i*.45))) })),
+      last7Days: Array.from({ length: 7 }, (_, i) => ({ date: String(i), count: 120 + Math.floor(95*Math.abs(Math.sin(i*.8))) })),
+      topPaths: [{name:'/',count:88},{name:'/portfolio',count:63},{name:'/assets/app.css',count:39}],
+      topCountries: [{name:'DE',count:54},{name:'NL',count:29},{name:'FR',count:21}],
+      agents: [{name:'Chrome',count:120},{name:'Bot / scanner',count:58}],
+      incidents: [{at: now-90000,type:'scan',source:'203.0.113.xxx',count:5,path:'/.env',status:403}],
+    },
     history: Array.from({ length: 48 }, (_, i) => ({ time: now - (47-i)*2000, cpu: 15 + Math.round(9 * Math.abs(Math.sin(i*.35)) + 4*Math.abs(Math.sin(i*1.21))), ram: 47 + Math.round(3 * Math.sin(i*.12)) })),
   };
 }
@@ -36,12 +45,16 @@ function addDemoEvent() {
   const status = Math.random() < .13 ? 404 : 200;
   const path = demoPaths[Math.floor(Math.random()*demoPaths.length)];
   const suspicious = path === '/wp-admin';
-  const event = { id: 'demo-'+(++seq), at: Date.now(), method: 'GET', path, status: suspicious ? 403 : status, suspicious, geo: city };
+  const event = { id: 'demo-'+(++seq), at: Date.now(), method: 'GET', path, status: suspicious ? 403 : status, suspicious, geo: { ...city, country: 'DE' }, source: '203.0.113.xxx', agent: suspicious ? 'Bot / scanner' : 'Chrome', referrer: null, bytes: 2483, durationMs: 14 };
   demo.events.unshift(event);
   if (demo.events.length > 90) demo.events.pop();
   demo.traffic.rpm = demo.events.filter(e => Date.now()-e.at < 60000).length;
   demo.traffic.errors = demo.events.filter(e => Date.now()-e.at < 60000 && e.status >= 400).length;
   demo.traffic.totalSinceStart++;
+  demo.analytics.today.requests++;
+  if(suspicious)demo.analytics.today.suspicious++;
+  demo.analytics.last24Hours[23].count++;
+  demo.analytics.last7Days[6].count++;
   demo.metrics.cpuPercent = Math.min(100, Math.max(8, demo.metrics.cpuPercent + Math.round(Math.random()*12-6)));
   demo.metrics.memory.usedPercent = Math.min(92, Math.max(43, demo.metrics.memory.usedPercent + Math.round(Math.random()*3-1)));
   demo.metrics.network.rxBps = Math.round(10000+Math.random()*140000);
@@ -110,18 +123,70 @@ function drawRequestBars(events) {
 function drawEvents(events) {
   const matched=(events||[]).filter(e=>filter==='all'||(filter==='errors'&&e.status>=400)||(filter==='suspicious'&&e.suspicious));
   setText('event-count',String(matched.length).padStart(2,'0'));
-  const list=$('events-list');list.replaceChildren();
+  const list=$('events-list');
+  const expanded=new Set([...list.querySelectorAll('details.event-details[open]')].map(x=>x.dataset.id));
+  list.replaceChildren();
   if(!matched.length){const empty=document.createElement('div');empty.className='empty-state';empty.textContent=filter==='all'?'Пока нет новых запросов. Открой сайт в другой вкладке, чтобы увидеть событие.':'По этому фильтру событий нет';list.append(empty);return;}
   for(const e of matched.slice(0,90)){
-    const row=document.createElement('div');row.className='event-row';
+    const details=document.createElement('details');details.className='event-details';details.dataset.id=e.id;details.open=expanded.has(e.id);
+    const row=document.createElement('summary');row.className='event-row';
     const time=document.createElement('div');time.className='event-time';
     time.textContent=new Date(e.at).toLocaleTimeString('ru-RU',{hour12:false});
     const method=document.createElement('span');method.className='event-method';method.textContent=' '+e.method;time.append(method);
     const path=document.createElement('span');path.className='event-path';path.title=e.path;path.textContent=e.path;
     const code=document.createElement('span');code.className='event-code'+(e.status>=500?' error':e.status>=400?' warn':'');code.textContent=e.status;
-    row.append(time,path,code);list.append(row);
+    row.append(time,path,code);details.append(row);
+    const extra=document.createElement('div');extra.className='event-extra';
+    const properties=[['Источник (маска)',e.source],['Клиент',e.agent],['Страна',e.geo?.country],['Referer (домен)',e.referrer],['Ответ',formatBytes(e.bytes)],['Время обработки',e.durationMs==null?'— (нужен расширенный лог)':e.durationMs+' мс']];
+    for(const [label,value] of properties){const box=document.createElement('div');const k=document.createElement('span');k.textContent=label;const v=document.createElement('strong');v.textContent=value==null?'—':String(value);box.append(k,v);extra.append(box);}
+    details.append(extra);list.append(details);
   }
 }
+function drawBars(id, points, daily=false) {
+  const root=$(id);if(!root)return;
+  root.replaceChildren();
+  const max=Math.max(1,...(points||[]).map(p=>p.count||0));
+  for(const p of points||[]){
+    const bar=document.createElement('div');bar.className='analytics-bar';
+    bar.style.height=`${Math.max(2, 100*(p.count||0)/max)}%`;
+    bar.title=`${daily?p.date:p.hour}: ${p.count||0} запросов`;
+    root.append(bar);
+  }
+}
+function renderRanks(id, rows) {
+  const el=$(id);if(!el)return;
+  el.replaceChildren();
+  if(!rows?.length){const x=document.createElement('div');x.className='rank-empty';x.textContent='Пока нет данных';el.append(x);return;}
+  for(const r of rows.slice(0,6)){
+    const row=document.createElement('div');row.className='rank-row';
+    const name=document.createElement('span');name.textContent=r.name;name.title=r.name;
+    const count=document.createElement('b');count.textContent=r.count;
+    row.append(name,count);el.append(row);
+  }
+}
+function drawAnalytics(stats) {
+  if(!stats)return;
+  setText('stat-requests',stats.today?.requests??0);
+  setText('stat-sources',stats.today?.uniqueSources??0);
+  setText('stat-scans',stats.today?.suspicious??0);
+  setText('stat-bytes',formatBytes(stats.today?.bytes||0));
+  drawBars('hour-bars',stats.last24Hours);
+  drawBars('daily-bars',stats.last7Days,true);
+  renderRanks('top-paths',stats.topPaths);
+  renderRanks('top-countries',stats.topCountries);
+  renderRanks('top-agents',stats.agents);
+  const list=$('incidents-list');list.replaceChildren();
+  if(!stats.incidents?.length){const d=document.createElement('div');d.className='empty-state';d.textContent='Серий сканирования и инцидентов доступности пока не зафиксировано';list.append(d);return;}
+  for(const inc of stats.incidents.slice(0,12)){
+    const row=document.createElement('div');row.className='incident-row';
+    const when=document.createElement('time');when.textContent=new Date(inc.at).toLocaleString('ru-RU');
+    const body=document.createElement('div');
+    const title=document.createElement('strong');title.textContent=inc.type==='scan'?'Подозрительная серия запросов':inc.type==='site-down'?'Сайт недоступен':'Сайт восстановлен';
+    const note=document.createElement('span');note.textContent=inc.type==='scan'?`${inc.source||'Источник скрыт'} · ${inc.count||'?'} запросов · ${inc.path||''}`:inc.label||'Website';
+    body.append(title,note);row.append(when,body);list.append(row);
+  }
+}
+
 function drawUI() {
   renderPending=false;
   const state=current(); if(!state) return;
@@ -141,9 +206,15 @@ function drawUI() {
   setText('rpm',t.rpm??0);setText('error-count',`${t.errors||0} ОШИБОК`);$('error-count').classList.toggle('danger-text',(t.errors||0)>0);
   drawRequestBars(state.events||[]);
   const config=state.config||{};
+  const attribution=$('geo-attribution');
+  if(attribution){
+    const provider=config.geoAttribution;
+    attribution.hidden=isDemo || provider?.url!=='https://db-ip.com';
+    if(!attribution.hidden){attribution.href='https://db-ip.com';attribution.textContent='IP Geolocation by DB-IP';}
+  }
   document.querySelectorAll('.site-name').forEach(x=>x.textContent=config.siteLabel||DEMO_SITE);
   setText('vps-name',config.vpsLabel||'VPS');
-  let siteLink='https://scrmvv.space';
+  let siteLink='https://example.org';
   try{const url=new URL(config.siteUrl);if(['https:','http:'].includes(url.protocol))siteLink=url.href;}catch{}
   $('site-link').href=siteLink;
   setStatus('vps-status','up');setStatus('nginx-status',h.nginx||'unknown');setStatus('site-status',h.site?.status||'unknown');
@@ -153,6 +224,7 @@ function drawUI() {
   setText('uptime',formatUptime(m.uptimeSec));setText('load',(m.load??0).toFixed(2));
   drawHistory(state.history);
   drawEvents(state.events);
+  drawAnalytics(state.analytics);
   const coords=(state.events||[]).filter(e=>e.geo).map(e=>`${e.geo.lat.toFixed(1)}:${e.geo.lon.toFixed(1)}`);
   setText('countries',`${new Set(coords).size} геоточек`);
   setText('last-access',state.events?.[0]?.at?new Date(state.events[0].at).toLocaleTimeString('ru-RU',{hour12:false}):'—');
@@ -170,13 +242,16 @@ function handleSse(payload){
     else scheduleRender();
   } else if(!live)return;
   else if(message.type==='metrics'){
-    live.metrics=message.data.metrics;live.traffic=message.data.traffic;live.history=message.data.history;scheduleRender();
+    live.metrics=message.data.metrics;live.traffic=message.data.traffic;live.history=message.data.history;live.analytics=message.data.analytics;scheduleRender();
   } else if(message.type==='access'){
     live.events.unshift(message.data);if(live.events.length>90)live.events.length=90;
     if(mode==='live'){triggerTopology();scheduleRender();}
   } else if(message.type==='geo'){
     const target=live.events.find(e=>e.id===message.data.id);
     if(target){target.geo=message.data.geo;if(mode==='live')globe.addArc(message.data.geo,target.status);scheduleRender();}
+  } else if(message.type==='incident'){
+    if(live.analytics){live.analytics.incidents ||= [];live.analytics.incidents.unshift(message.data);}
+    scheduleRender();
   } else if(message.type==='health'){
     live.health={...live.health,...message.data};
     if(mode==='live' && renderedGeoFor==='live' && !globe.serverGeo && live.health.serverGeo)globe.setServer(live.health.serverGeo);
@@ -185,7 +260,8 @@ function handleSse(payload){
 }
 function openStream(){
   if(!window.EventSource){connected=false;return;}
-  networkStream=new EventSource('/api/stream');
+  try { networkStream=new EventSource('/api/stream'); }
+  catch { connected=false;scheduleRender();return; }
   networkStream.onmessage=ev=>handleSse(ev.data);
   networkStream.onerror=()=>{connected=false;scheduleRender();};
   networkStream.onopen=()=>{connected=true;scheduleRender();};

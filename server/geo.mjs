@@ -5,6 +5,16 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(execFile);
 
+// The Lite database requires attribution when its results are shown in a web UI.
+// The source is inferred from the configured filename; only public credit is exposed.
+export function geoAttribution(database) {
+  if (/dbip/i.test(String(database || '').split(/[\\/]/).pop())) {
+    return { text: 'IP Geolocation by DB-IP', url: 'https://db-ip.com' };
+  }
+  return null;
+}
+
+
 function isPublicIp(ip) {
   if (!isIP(ip)) return false;
   if (ip.includes(':')) return !(/^(::1|fc|fd|fe80|ff|::ffff:127\.)/i.test(ip));
@@ -38,13 +48,16 @@ export function createGeoLookup(database) {
       queue.push(async () => {
         try {
           const opts = { timeout: 2800, maxBuffer: 4000 };
-          const [latResult, lonResult] = await Promise.all([
+          const [latResult, lonResult, countryResult] = await Promise.all([
             execAsync('mmdblookup', ['--file', database, '--ip', ip, 'location', 'latitude'], opts),
             execAsync('mmdblookup', ['--file', database, '--ip', ip, 'location', 'longitude'], opts),
+            execAsync('mmdblookup', ['--file', database, '--ip', ip, 'country', 'iso_code'], opts).catch(() => ({stdout: ''})),
           ]);
           const lat = readNumber(latResult.stdout);
           const lon = readNumber(lonResult.stdout);
-          resolve(lat !== null && lon !== null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null);
+          const codeMatch = countryResult.stdout.match(/"([A-Z]{2})"\s*<utf8_string>/);
+          const country = codeMatch ? codeMatch[1] : null;
+          resolve(lat !== null && lon !== null && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon, country } : null);
         } catch { resolve(null); }
       });
       runQueue();

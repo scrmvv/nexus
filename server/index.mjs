@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Metrics, AccessLogTail, Traffic, siteStatus, serviceStatus } from './monitor.mjs';
-import { createGeoLookup } from './geo.mjs';
+import { createGeoLookup, geoAttribution } from './geo.mjs';
+import { Analytics } from './analytics.mjs';
+import { Alerts } from './alerts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLIENT = path.join(ROOT, 'client');
@@ -20,15 +22,22 @@ function loadDotEnv() {
 }
 loadDotEnv();
 const PORT = Math.min(65535, Math.max(1025, Number(process.env.PORT || 4317)));
-const SITE_URL = process.env.SITE_URL || 'https://scrmvv.space/';
-const SITE_LABEL = (process.env.SITE_LABEL || 'scrmvv.space').slice(0, 64);
+const SITE_URL = process.env.SITE_URL || 'https://example.org/';
+const SITE_LABEL = (process.env.SITE_LABEL || 'example.org').slice(0, 64);
 const VPS_LABEL = (process.env.VPS_LABEL || 'My VPS').slice(0, 64);
-const LOG_PATH = process.env.NGINX_ACCESS_LOG || '/var/log/nexus/scrmvv.access.log';
+const LOG_PATH = process.env.NGINX_ACCESS_LOG || '/var/log/nginx/example.access.log';
 const GEOIP_MMDB = process.env.GEOIP_MMDB || '';
 const latitude = process.env.SERVER_LAT === undefined || process.env.SERVER_LAT === '' ? null : Number(process.env.SERVER_LAT);
 const longitude = process.env.SERVER_LON === undefined || process.env.SERVER_LON === '' ? null : Number(process.env.SERVER_LON);
 const serverGeo = latitude !== null && longitude !== null && Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? { lat: latitude, lon: longitude } : null;
 const geo = createGeoLookup(GEOIP_MMDB);
+const analytics = new Analytics(path.join(ROOT, 'data', 'stats.json'));
+const alerts = new Alerts({
+  token: process.env.TELEGRAM_BOT_TOKEN || '',
+  chatIds: process.env.TELEGRAM_CHAT_IDS || '',
+  threshold: process.env.ALERT_SCAN_THRESHOLD || '3',
+  onIncident: incident => { analytics.addIncident(incident); broadcast({ type: 'incident', data: incident }); },
+});
 const metrics = new Metrics();
 const subscribers = new Set();
 let logReadable = false;
@@ -46,7 +55,7 @@ function broadcast(event) {
     writeSse(res, event);
   }
 }
-const traffic = new Traffic(geo.lookup, broadcast);
+const traffic = new Traffic(geo.lookup, broadcast, analytics, alerts);
 const tail = new AccessLogTail(LOG_PATH, line => { void traffic.record(line); }, state => {
   logReadable = state;
   broadcast({ type: 'health', data: { logReadable } });
@@ -58,8 +67,9 @@ function snapshot() {
     history: metrics.history,
     events: traffic.events,
     traffic: traffic.counters(),
+    analytics: analytics.overview(),
     health: { ...services, logReadable, geoEnabled: geo.enabled, serverGeo, lastHealthCheck },
-    config: { vpsLabel: VPS_LABEL, siteLabel: SITE_LABEL, siteUrl: SITE_URL },
+    config: { vpsLabel: VPS_LABEL, siteLabel: SITE_LABEL, siteUrl: SITE_URL, geoAttribution: geoAttribution(GEOIP_MMDB) },
     now: Date.now(),
   };
 }
@@ -109,24 +119,27 @@ const server = http.createServer((req, res) => {
 
 const metricTimer = setInterval(() => {
   currentMetrics = metrics.sample();
-  broadcast({ type: 'metrics', data: { metrics: currentMetrics, traffic: traffic.counters(), history: metrics.history } });
+  broadcast({ type: 'metrics', data: { metrics: currentMetrics, traffic: traffic.counters(), history: metrics.history, analytics: analytics.overview() } });
 }, 2000);
 const serviceTimer = setInterval(checkHealth, 15000);
 async function checkHealth() {
   const [nginx, site] = await Promise.all([serviceStatus('nginx'), siteStatus(SITE_URL)]);
   services = { nginx, site };
+  alerts.onHealth(site.status, SITE_LABEL);
   lastHealthCheck = Date.now();
   broadcast({ type: 'health', data: { ...services, logReadable, geoEnabled: geo.enabled, serverGeo, lastHealthCheck } });
 }
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[NEXUS] http://127.0.0.1:${PORT}`);
-  console.log(`[NEXUS] Site: ${SITE_LABEL} | Log: ${LOG_PATH} | Local GeoIP: ${geo.enabled ? 'on' : 'off'}`);
+  console.log(`[NEXUS] Site: ${SITE_LABEL} | Log: ${LOG_PATH} | Local GeoIP: ${geo.enabled ? 'on' : 'off'} | Telegram: ${alerts.enabled ? 'on' : 'off'}`);
   tail.start();
+  analytics.start();
   void checkHealth();
 });
 function shutdown() {
   clearInterval(metricTimer); clearInterval(serviceTimer);
   tail.stop();
+  analytics.stop();
   for (const client of subscribers) client.end();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 3000).unref();

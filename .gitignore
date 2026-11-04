@@ -1,4 +1,24 @@
+# Private runtime config / credentials
 .env
-node_modules/
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Runtime data, private analytics and downloaded GeoIP databases
+data/
+*.mmdb
+*.mmdb.gz
 *.log
+*.log.*
+
+# Developer files / output
+node_modules/
+coverage/
+.nyc_output/
 .DS_Store
+Thumbs.db
+*.zip
+*.tar.gz
+*.bak
+*~

@@ -20,23 +20,47 @@ export function sanitizePath(path) {
   return clean || '/';
 }
 
+export function maskIP(ip) {
+  if (isIP(ip) === 4) return ip.replace(/\.\d+$/, '.xxx');
+  if (isIP(ip) === 6) return ip.split(':').slice(0, 3).join(':') + ':…';
+  return 'unknown';
+}
+export function classifyUserAgent(raw) {
+  const ua = String(raw || '').slice(0, 300);
+  if (/curl\//i.test(ua)) return 'curl';
+  if (/python-requests|python-urllib|aiohttp/i.test(ua)) return 'Python client';
+  if (/wget\//i.test(ua)) return 'wget';
+  if (/bot|spider|crawler|censys|zgrab|masscan|nmap|httpx|gobuster|nikto|sqlmap/i.test(ua)) return 'Bot / scanner';
+  if (/Edg\//i.test(ua)) return 'Edge';
+  if (/Firefox\//i.test(ua)) return 'Firefox';
+  if (/Chrome\//i.test(ua)) return 'Chrome';
+  if (/Safari\//i.test(ua)) return 'Safari';
+  return 'Other / unknown';
+}
+function referralHost(raw) {
+  if (!raw || raw === '-') return null;
+  try {
+    const url = new URL(raw);
+    return ['http:', 'https:'].includes(url.protocol) ? url.hostname.slice(0, 80) : null;
+  } catch { return null; }
+}
 export function parseAccessLine(line) {
-  // Exclude our own periodic site health check from visitor analytics.
-  if (line.includes('\"NEXUS-Monitor/1.0\"')) return null;
-  // Standard nginx combined log: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$referer" "$user_agent"
-  const m = line.match(/^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"([^"]*)"\s+(\d{3})\s+(\S+)/);
+  if (line.includes('"NEXUS-Monitor/1.0"')) return null;
+  // nginx combined, optionally followed by rt=<request_time>.
+  const m = line.match(/^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"([^"]*)"\s+(\d{3})\s+(\S+)\s+"([^"]*)"\s+"([^"]*)"(?:\s+rt=(\d+(?:\.\d+)?))?/);
   if (!m || !isIP(m[1])) return null;
   const [method = '-', rawPath = '/'] = m[3].split(/\s+/, 3);
   const status = Number(m[4]);
   const path = sanitizePath(rawPath);
-  const suspicious = /(\/\.env\b|\/wp-admin\b|\/wp-login\b|\/\.git\b|\/phpmyadmin\b|\/cgi-bin\b|\/vendor\/phpunit\b|\/actuator\b)/i.test(path);
+  const suspicious = /(\/\.env(?:\b|$)|\/wp-admin\b|\/wp-login\b|\/\.git\b|\/phpmyadmin\b|\/cgi-bin\b|\/vendor\/phpunit\b|\/actuator\b|\/\.aws\b|\/\.svn\b|\/server-status\b)/i.test(path);
+  const reason = suspicious ? 'known probing path' : null;
+  const bytes = /^\d+$/.test(m[5]) ? Math.min(Number(m[5]), 1e12) : 0;
+  const durationMs = m[8] != null ? Math.min(Math.round(Number(m[8]) * 1000), 3_600_000) : null;
   return {
-    ip: m[1],
+    ip: m[1], source: maskIP(m[1]),
     method: method.slice(0, 12).replace(/[^A-Z]/g, '') || '-',
-    path,
-    status,
-    suspicious,
-    // Real IP and raw request are never sent to the browser.
+    path, status, suspicious, reason, bytes,
+    agent: classifyUserAgent(m[7]), referrer: referralHost(m[6]), durationMs,
     at: Date.now(),
   };
 }
@@ -198,9 +222,11 @@ export class AccessLogTail {
 }
 
 export class Traffic {
-  constructor(geoLookup, emit) {
+  constructor(geoLookup, emit, analytics = null, alerts = null) {
     this.geoLookup = geoLookup;
     this.emit = emit;
+    this.analytics = analytics;
+    this.alerts = alerts;
     this.events = [];
     this.hits = [];
     this.allRequests = 0;
@@ -211,14 +237,21 @@ export class Traffic {
     this.allRequests++;
     this.hits.push({ at: item.at, status: item.status });
     this.clean();
-    const safe = { id: `${item.at}-${this.allRequests}`, at: item.at, method: item.method, path: item.path, status: item.status, suspicious: item.suspicious, geo: null };
+    const safe = {
+      id: `${item.at}-${this.allRequests}`, at: item.at, method: item.method,
+      path: item.path, status: item.status, suspicious: item.suspicious,
+      source: item.source, agent: item.agent, referrer: item.referrer,
+      bytes: item.bytes, durationMs: item.durationMs, geo: null,
+    };
+    this.analytics?.record(item);
+    this.alerts?.onRequest(item);
     this.events.unshift(safe);
     if (this.events.length > MAX_EVENTS) this.events.length = MAX_EVENTS;
     this.emit({ type: 'access', data: safe });
-    // Deferred geolocation. Never send an IP to the frontend or any online service.
     const geo = await this.geoLookup(item.ip);
     if (geo) {
       safe.geo = geo;
+      if (geo.country) this.analytics?.addCountry(item.at, geo.country);
       this.emit({ type: 'geo', data: { id: safe.id, geo } });
     }
   }

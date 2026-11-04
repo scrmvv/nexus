@@ -1,14 +1,15 @@
+# EXAMPLE: edit User, Group, WorkingDirectory and ExecStart before installing.
 [Unit]
-Description=NEXUS personal VPS live dashboard
+Description=NEXUS infrastructure dashboard
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=deploy
-Group=deploy
-WorkingDirectory=/home/deploy/nexus
-ExecStart=/usr/bin/node /home/deploy/nexus/server/index.mjs
+User=nexus
+Group=nexus
+WorkingDirectory=/opt/nexus
+ExecStart=/usr/bin/node /opt/nexus/server/index.mjs
 Restart=on-failure
 RestartSec=4
 Environment=NODE_ENV=production

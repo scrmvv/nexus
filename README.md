@@ -8,7 +8,7 @@
 
 **Zero npm dependencies · Real-time SSE · Local GeoIP · Optional Telegram alerts**
 
-![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-43853D?logo=nodedotjs&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue) ![Tests](https://img.shields.io/badge/tests-14%20passing-2ca58d)
+![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2020-43853D?logo=nodedotjs&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue) ![Tests](https://img.shields.io/badge/tests-20%20passing-2ca58d)
 
 [English](README.md) · [Русский](README.ru.md)
 
@@ -100,6 +100,31 @@ access_log /var/log/nginx/example.access.log nexus_timed;
 ```
 
 NEXUS logs only processed HTTP requests. Requests blocked upstream by a CDN, requests to other virtual hosts, and unsuccessful TCP connections are outside its scope.
+
+### Access-log rotation (v0.2.2)
+
+NEXUS follows the active log by file identity (device + inode), drains pending data from the previous file on `rename/create`, and recovers when the file is temporarily missing or truncated. It skips historical lines **only on the initial startup**; after rotation, new records are read from byte zero.
+
+**Nginx must still reopen its own log.** If `example.access.log` remains empty while `example.access.log.1` grows, Nginx is still writing to the renamed file. NEXUS cannot fix that from its read-only account. The example [`deploy/nexus-logrotate.conf`](deploy/nexus-logrotate.conf) uses:
+
+```text
+postrotate
+    /usr/sbin/nginx -t
+    /bin/systemctl reload nginx
+endscript
+```
+
+Avoid `|| true` or redirecting all error output away; otherwise a failed postrotate action silently leaves Nginx writing to `.1`. Adapt this hook to your distribution and service manager. Do **not** overwrite a working production `logrotate` file with this template: reconcile its log path and Unix owner/group first. Check it using `sudo logrotate -d /etc/logrotate.d/YOUR_CONFIG` (dry-run), and validate with a controlled rotation during a maintenance window if necessary. A configuration reload does not require stopping the website.
+
+To diagnose a stalled live feed, compare file sizes and modification times, then make a real request:
+
+```bash
+sudo ls -lhi /var/log/nginx/example.access.log*
+curl -fsS -o /dev/null 'https://example.org/?nexus-check=1'
+sudo tail -n 2 /var/log/nginx/example.access.log
+```
+
+`logReadable: true` means the active path is accessible. It **does not** guarantee that Nginx is currently writing to it, and a quiet site can legitimately go without requests.
 
 ## Telegram alerts
 

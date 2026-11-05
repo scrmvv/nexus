@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.2] — 2026-11-05
+
+### Fixed
+
+- Make Nginx access-log reading resilient to `rename/create` rotation, temporary missing paths and `copytruncate`.
+- Track the file identity from an **opened descriptor** (`device + inode`) to eliminate the stat/open race.
+- Drain the old descriptor before switching to a replacement log, preventing loss of final lines written during rotation.
+- Preserve recent complete lines following a burst larger than 1 MiB instead of dropping the whole batch.
+- Update the sample `logrotate` postrotate hook: validate Nginx configuration, use `systemctl reload nginx`, and **do not suppress failures**.
+- Add regression tests for startup behavior, rotation, log replacement gaps, `copytruncate`, and large writes.
+
+### Operations
+
+- Upgrading NEXUS does **not** replace an existing `/etc/logrotate.d/*` file. Review the updated `deploy/nexus-logrotate.conf` and apply its `postrotate` change manually if needed.
+- NEXUS cannot force Nginx to stop writing to an old `.1` file. If the active log remains empty while `.1` grows, fix Nginx's postrotate reload; see the README.
+- No changes to `.env`, HTTP endpoints, Telegram settings, GeoIP, or analytics storage.
+
+
 ## [0.2.1] — 2026-11-04
 
 ### Fixed and improved

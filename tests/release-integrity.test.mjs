@@ -20,3 +20,10 @@ test('GeoIP module exports both functions required by the server', () => {
   const result = geoAttribution('/var/lib/nexus/dbip-city-lite.mmdb');
   assert.deepEqual(result, { text: 'IP Geolocation by DB-IP', url: 'https://db-ip.com' });
 });
+
+test('logrotate example reloads nginx and does not hide postrotate errors', () => {
+  const template = fs.readFileSync(path.join(ROOT, 'deploy', 'nexus-logrotate.conf'), 'utf8');
+  assert.match(template, /postrotate[\s\S]*?systemctl reload nginx[\s\S]*?endscript/);
+  assert.doesNotMatch(template, /\|\|\s*true/);
+  assert.doesNotMatch(template, />\/dev\/null\s+2>&1/);
+});

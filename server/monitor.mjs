@@ -193,50 +193,93 @@ export class AccessLogTail {
     this.onState = onState;
     this.position = 0;
     this.inode = null;
+    this.identity = null;
+    this.handle = null;
+    this.initialized = false;
     this.partial = '';
     this.timer = null;
     this.running = false;
     this.readable = false;
   }
+  setReadable(value) {
+    if (this.readable === value) return;
+    this.readable = value;
+    this.onState(value);
+  }
+  async readAvailable(handle) {
+    const stat = await handle.stat();
+    if (stat.size < this.position) {
+      // copytruncate keeps the inode but resets the contents.
+      this.position = 0;
+      this.partial = '';
+    }
+    const MAX_BYTES = 1024 * 1024;
+    let unread = stat.size - this.position;
+    if (unread <= 0) return;
+    // Preserve the newest log lines after a large burst rather than dropping
+    // the entire batch. Skip the first (potentially incomplete) line.
+    const skipPartialStart = unread > MAX_BYTES;
+    if (skipPartialStart) {
+      this.position = stat.size - MAX_BYTES;
+      this.partial = '';
+      unread = MAX_BYTES;
+    }
+    const buf = Buffer.allocUnsafe(unread);
+    const { bytesRead } = await handle.read(buf, 0, unread, this.position);
+    if (bytesRead <= 0) return;
+    this.position += bytesRead;
+    const parts = (this.partial + buf.subarray(0, bytesRead).toString('utf8')).split('\n');
+    this.partial = (parts.pop() || '').slice(-1024);
+    if (skipPartialStart) parts.shift();
+    for (const line of parts.slice(-400)) this.onLine(line);
+  }
   async poll() {
     if (this.running) return;
     this.running = true;
+    let candidate = null;
     try {
-      const stat = await fs.promises.stat(this.path);
-      if (this.inode === null || stat.ino !== this.inode || stat.size < this.position) {
-        const firstOpen = this.inode === null;
+      // Open first, then stat the descriptor. A rotation between stat(path)
+      // and open(path) must not make us read a different inode at an old offset.
+      candidate = await fs.promises.open(this.path, 'r');
+      const stat = await candidate.stat();
+      if (!stat.isFile()) throw new Error('Access log is not a regular file');
+      const identity = `${stat.dev}:${stat.ino}`;
+      if (identity !== this.identity) {
+        if (this.handle) {
+          // Drain anything written just before/while the old log was renamed.
+          await this.readAvailable(this.handle);
+          await this.handle.close();
+        }
+        this.handle = candidate;
+        candidate = null;
+        this.identity = identity;
         this.inode = stat.ino;
-        this.position = firstOpen ? stat.size : 0; // Only initial startup skips historical logs.
+        this.position = this.initialized ? 0 : stat.size;
+        this.initialized = true;
         this.partial = '';
       }
-      await fs.promises.access(this.path, fs.constants.R_OK);
-      if (!this.readable) { this.readable = true; this.onState(true); }
-      const unread = stat.size - this.position;
-      if (unread <= 0) return;
-      if (unread > 1024 * 1024) { // Recover gracefully from a spike.
-        this.position = stat.size;
-        this.partial = '';
-        return;
-      }
-      const fd = await fs.promises.open(this.path, 'r');
-      try {
-        const buf = Buffer.alloc(unread);
-        const { bytesRead } = await fd.read(buf, 0, unread, this.position);
-        this.position += bytesRead;
-        const parts = (this.partial + buf.subarray(0, bytesRead).toString('utf8')).split('\n');
-        this.partial = (parts.pop() || '').slice(-1024);
-        for (const line of parts.slice(-400)) this.onLine(line);
-      } finally { await fd.close(); }
+      this.setReadable(true);
+      await this.readAvailable(this.handle);
     } catch {
-      if (this.readable) { this.readable = false; this.onState(false); }
-    } finally { this.running = false; }
+      this.setReadable(false);
+    } finally {
+      if (candidate) await candidate.close().catch(() => {});
+      this.running = false;
+    }
   }
   start() {
-    this.poll();
-    this.timer = setInterval(() => this.poll(), 900);
+    void this.poll();
+    this.timer = setInterval(() => { void this.poll(); }, 900);
     this.timer.unref();
   }
-  stop() { if (this.timer) clearInterval(this.timer); }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    if (this.handle) {
+      void this.handle.close().catch(() => {});
+      this.handle = null;
+    }
+  }
 }
 
 export class Traffic {
